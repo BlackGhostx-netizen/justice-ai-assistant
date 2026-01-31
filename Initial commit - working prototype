@@ -6,23 +6,15 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 import sys
 import re
-import nltk
-from nltk.tokenize import word_tokenize, sent_tokenize
-from nltk.corpus import stopwords
-from nltk.stem import SnowballStemmer
 from collections import Counter
 
-# Скачиваем необходимые ресурсы NLTK при первом запуске
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    print("Загрузка ресурсов NLTK...")
-    nltk.download('punkt', quiet=True)
-    nltk.download('stopwords', quiet=True)
-
-# Русские стоп-слова и стеммер
-RUSSIAN_STOPWORDS = set(stopwords.words('russian') if 'russian' in stopwords.fileids() else [])
-STEMMER = SnowballStemmer("russian")
+# Русские стоп-слова (простой список)
+RUSSIAN_STOPWORDS = {
+    "и", "в", "на", "с", "по", "к", "у", "о", "об", "от", "до", "за",
+    "из", "или", "но", "а", "же", "бы", "ли", "же", "вот", "что", "это",
+    "как", "так", "для", "то", "со", "при", "не", "ни", "да", "нет",
+    "из-за", "под", "над", "перед", "после", "через", "между"
+}
 
 
 class UserRole(Enum):
@@ -53,7 +45,7 @@ class AnalysisResult:
     contradictions: List[str]
     predicted_outcome: str = ""
     role_specific_insights: List[str] = None
-    nlp_analysis: Dict[str, Any] = None  # Новое поле для NLP-анализа
+    nlp_analysis: Dict[str, Any] = None
 
     def __post_init__(self):
         if self.role_specific_insights is None:
@@ -73,7 +65,7 @@ class PersonalizedReport:
     warnings: List[str]
     documents_summary: List[str]
     raw_analysis: AnalysisResult
-    nlp_summary: Dict[str, Any] = None  # Новое поле для NLP-резюме
+    nlp_summary: Dict[str, Any] = None
 
     def __post_init__(self):
         if self.nlp_summary is None:
@@ -81,30 +73,31 @@ class PersonalizedReport:
 
 
 class NLPAnalyzer:
-    """Класс для NLP-анализа юридических текстов"""
+    """Класс для простого NLP-анализа юридических текстов (без NLTK)"""
+
+    @staticmethod
+    def simple_tokenize(text: str) -> List[str]:
+        """Простая токенизация без NLTK"""
+        # Убираем знаки препинания и разбиваем на слова
+        text_clean = re.sub(r'[^\w\s]', ' ', text.lower())
+        return [word for word in text_clean.split() if word.strip()]
 
     @staticmethod
     def analyze_text(text: str) -> Dict[str, Any]:
-        """Основной анализ текста с использованием NLTK"""
+        """Основной анализ текста без NLTK"""
         if not text or not isinstance(text, str):
             return {"error": "Текст пустой или не строка"}
 
         try:
-            # Токенизация
-            words = word_tokenize(text.lower(), language='russian')
-            sentences = sent_tokenize(text, language='russian')
+            # Простая токенизация
+            words = NLPAnalyzer.simple_tokenize(text)
+            sentences = [s.strip() for s in text.split('.') if s.strip()]
 
-            # Удаление стоп-слов и пунктуации
-            filtered_words = [
-                word for word in words
-                if word.isalnum() and word not in RUSSIAN_STOPWORDS
-            ]
-
-            # Стемминг
-            stemmed_words = [STEMMER.stem(word) for word in filtered_words]
+            # Удаление стоп-слов
+            filtered_words = [word for word in words if word not in RUSSIAN_STOPWORDS]
 
             # Частотный анализ
-            word_freq = Counter(stemmed_words)
+            word_freq = Counter(filtered_words)
             top_keywords = word_freq.most_common(10)
 
             # Поиск юридических терминов
@@ -160,7 +153,7 @@ class NLPAnalyzer:
 
             # Нормативные акты
             "гк рф", "ук рф", "гпк рф", "упк рф", "нк рф",
-            "тк рф", "ск рф", "зпп", "коап"
+            "тк рф", "ск рф", "зпп", "коап", "административн"
         ]
 
         found_terms = []
@@ -170,17 +163,19 @@ class NLPAnalyzer:
             if term in text_lower:
                 found_terms.append(term)
 
-        return list(set(found_terms))[:15]  # Ограничиваем количество
+        return list(set(found_terms))[:15]
 
     @staticmethod
     def extract_monetary_amounts(text: str) -> List[Dict[str, str]]:
         """Извлечение денежных сумм из текста"""
         patterns = [
             # Паттерны для сумм в рублях
-            (r'(\d+(?:[\s\d]*\d+)?)\s*(тыс|тысяч|т\.?\s*р\.?)\b', lambda m: f"{m.group(1).replace(' ', '')} тыс. руб."),
+            (r'(\d+(?:[\s\d]*\d+)?)\s*(тыс|тысяч|т\.?\s*р\.?)\b',
+             lambda m: f"{m.group(1).replace(' ', '')} тыс. руб."),
             (r'(\d+(?:[\s\d]*\d+)?)\s*(млн|миллион|млн\.?)\s*р(уб)?\.?',
              lambda m: f"{m.group(1).replace(' ', '')} млн руб."),
-            (r'(\d+(?:[\s\d]*\d+)?)\s*р(уб)?(лей)?\.?', lambda m: f"{m.group(1).replace(' ', '')} руб."),
+            (r'(\d+(?:[\s\d]*\d+)?)\s*р(уб)?(лей)?\.?',
+             lambda m: f"{m.group(1).replace(' ', '')} руб."),
             (r'\$?\s*(\d+(?:[\s\d]*\d+)?)\s*(доллар|евро|€|\$)',
              lambda m: f"{m.group(1).replace(' ', '')} {m.group(2)}"),
         ]
@@ -203,7 +198,7 @@ class NLPAnalyzer:
                 except:
                     continue
 
-        return amounts[:10]  # Ограничиваем количество
+        return amounts[:10]
 
     @staticmethod
     def extract_dates(text: str) -> List[str]:
@@ -212,8 +207,6 @@ class NLPAnalyzer:
             r'\d{1,2}\.\d{1,2}\.\d{4}',  # DD.MM.YYYY
             r'\d{1,2}\.\d{1,2}\.\d{2}',  # DD.MM.YY
             r'\d{4}-\d{2}-\d{2}',  # YYYY-MM-DD
-            r'\d{1,2}\s+(январ|феврал|март|апрел|ма|июн|июл|август|сентябр|октябр|ноябр|декабр)[а-я]*\s+\d{4}',
-            # 15 января 2023
         ]
 
         dates = []
@@ -221,7 +214,7 @@ class NLPAnalyzer:
             found_dates = re.findall(pattern, text, re.IGNORECASE)
             dates.extend(found_dates)
 
-        return list(set(dates))[:10]  # Убираем дубликаты и ограничиваем
+        return list(set(dates))[:10]
 
     @staticmethod
     def extract_law_references(text: str) -> List[str]:
@@ -242,8 +235,7 @@ class NLPAnalyzer:
 
     @staticmethod
     def analyze_sentiment(text: str) -> Dict[str, Any]:
-        """Простой анализ тональности текста"""
-        # Словари для определения тональности
+        """Простой анализ тональности текста без NLTK"""
         positive_words = {
             "удовлетворен", "выиграл", "прав", "справедлив", "законн",
             "обоснован", "доказан", "подтвержден", "восстановлен", "компенсирован"
@@ -260,14 +252,13 @@ class NLPAnalyzer:
             "решение", "определение", "закон", "статья", "пункт"
         }
 
-        # Анализируем слова
-        words = word_tokenize(text.lower(), language='russian')
-        filtered_words = [w for w in words if w.isalnum() and len(w) > 2]
+        # Простая токенизация
+        words = NLPAnalyzer.simple_tokenize(text)
 
         # Считаем совпадения
-        positive_count = sum(1 for w in filtered_words if any(pw in w for pw in positive_words))
-        negative_count = sum(1 for w in filtered_words if any(nw in w for nw in negative_words))
-        neutral_count = sum(1 for w in filtered_words if any(nw in w for nw in neutral_words))
+        positive_count = sum(1 for w in words if any(pw in w for pw in positive_words))
+        negative_count = sum(1 for w in words if any(nw in w for nw in negative_words))
+        neutral_count = sum(1 for w in words if any(nw in w for nw in neutral_words))
 
         total_scored = positive_count + negative_count + neutral_count
         if total_scored == 0:
@@ -275,7 +266,7 @@ class NLPAnalyzer:
 
         # Рассчитываем оценку
         sentiment_score = (positive_count - negative_count) / total_scored
-        confidence = total_scored / len(filtered_words) if filtered_words else 0
+        confidence = total_scored / len(words) if words else 0
 
         # Определяем категорию
         if sentiment_score > 0.2:
@@ -287,7 +278,7 @@ class NLPAnalyzer:
 
         return {
             "sentiment": sentiment,
-            "score": round((sentiment_score + 1) / 2, 2),  # Нормализуем к 0-1
+            "score": round((sentiment_score + 1) / 2, 2),
             "confidence": round(confidence, 2),
             "positive_words": positive_count,
             "negative_words": negative_count,
@@ -296,25 +287,24 @@ class NLPAnalyzer:
 
     @staticmethod
     def calculate_complexity(text: str, sentences: List[str]) -> float:
-        """Расчет сложности текста"""
+        """Расчет сложности текста без NLTK"""
         if not sentences:
             return 0.0
 
-        words = word_tokenize(text.lower(), language='russian')
-        filtered_words = [w for w in words if w.isalnum()]
+        words = NLPAnalyzer.simple_tokenize(text)
 
         # Средняя длина предложения
-        avg_sentence_length = len(filtered_words) / len(sentences)
+        avg_sentence_length = len(words) / len(sentences)
 
         # Средняя длина слова
-        avg_word_length = sum(len(w) for w in filtered_words) / len(filtered_words) if filtered_words else 0
+        avg_word_length = sum(len(w) for w in words) / len(words) if words else 0
 
         # Разнообразие лексики
-        unique_word_ratio = len(set(filtered_words)) / len(filtered_words) if filtered_words else 0
+        unique_word_ratio = len(set(words)) / len(words) if words else 0
 
         # Юридические термины увеличивают сложность
         legal_terms = NLPAnalyzer.extract_legal_terms(text)
-        legal_term_ratio = len(legal_terms) / len(filtered_words) if filtered_words else 0
+        legal_term_ratio = len(legal_terms) / len(words) if words else 0
 
         # Композитный показатель сложности
         complexity = (
@@ -328,7 +318,7 @@ class NLPAnalyzer:
 
     @staticmethod
     def compare_texts(text1: str, text2: str) -> Dict[str, Any]:
-        """Сравнение двух текстов"""
+        """Сравнение двух текстов без NLTK"""
         analysis1 = NLPAnalyzer.analyze_text(text1)
         analysis2 = NLPAnalyzer.analyze_text(text2)
 
@@ -485,15 +475,15 @@ class LegalAnalyticsCore:
         ]
 
     def analyze_case(self, case: LegalCase, role_answers: Dict[str, str] = None) -> AnalysisResult:
-        """Анализ дела с использованием NLP"""
+        """Анализ дела с использованием простого NLP"""
 
-        # NLP-анализ описания дела
+        # NLP-анализ описания дела (без NLTK)
         nlp_analysis = self.nlp_analyzer.analyze_text(case.description)
 
         # Семантический поиск похожих дел
         similar_cases = self.find_similar_cases(case.description)
 
-        # Определяем категорию на основе NLP-анализа
+        # Определяем категорию
         case_type = case.case_type.lower()
         legal_norms = []
         predicted_outcome = "не определён"
@@ -511,7 +501,7 @@ class LegalAnalyticsCore:
         # Оценка риска на основе тональности и сложности
         risk_score = self.calculate_risk_score(nlp_analysis)
 
-        # Формирование рекомендаций с учетом NLP-анализа
+        # Формирование рекомендаций
         recommendations = self.generate_recommendations(case.user_role, nlp_analysis, role_answers)
 
         # Поиск противоречий
@@ -523,11 +513,11 @@ class LegalAnalyticsCore:
         # Извлечение дополнительных норм права из текста
         law_references = nlp_analysis.get("law_references", [])
         if law_references:
-            legal_norms.extend(law_references[:3])  # Добавляем найденные ссылки
+            legal_norms.extend(law_references[:3])
 
         return AnalysisResult(
             similar_cases=similar_cases,
-            legal_norms=list(set(legal_norms))[:5],  # Убираем дубликаты
+            legal_norms=list(set(legal_norms))[:5],
             risk_score=risk_score,
             recommendations=recommendations,
             contradictions=contradictions,
@@ -537,27 +527,31 @@ class LegalAnalyticsCore:
         )
 
     def find_similar_cases(self, query: str) -> List[Dict]:
-        """Семантический поиск похожих дел на основе NLP"""
-        query_analysis = self.nlp_analyzer.analyze_text(query)
-        query_keywords = set([item["word"] for item in query_analysis.get("top_keywords", [])])
-        query_legal_terms = set(query_analysis.get("legal_terms_found", []))
+        """Семантический поиск похожих дел без сложного NLP"""
+        query_lower = query.lower()
+        query_words = set(self.nlp_analyzer.simple_tokenize(query))
 
         results = []
         for case in self.case_examples_db:
             # Сравниваем ключевые слова
             case_keywords = set(case.get("keywords", []))
-            keyword_overlap = len(query_keywords.intersection(case_keywords))
+            keyword_overlap = len(query_words.intersection(case_keywords))
 
             # Сравниваем описание
-            case_desc_analysis = self.nlp_analyzer.analyze_text(case["description"])
-            case_desc_keywords = set([item["word"] for item in case_desc_analysis.get("top_keywords", [])])
-            desc_keyword_overlap = len(query_keywords.intersection(case_desc_keywords))
+            case_desc_words = set(self.nlp_analyzer.simple_tokenize(case["description"]))
+            desc_keyword_overlap = len(query_words.intersection(case_desc_words))
+
+            # Также проверяем прямое совпадение
+            direct_match = any(keyword in query_lower for keyword in case["keywords"])
 
             # Общая оценка схожести
-            total_similarity = (keyword_overlap + desc_keyword_overlap) / 2
-            similarity_score = min(total_similarity / 5, 1.0)  # Нормализуем к 0-1
+            total_similarity = (keyword_overlap + desc_keyword_overlap)
+            if direct_match:
+                total_similarity += 2
 
-            if similarity_score > 0.3:  # Порог схожести
+            similarity_score = min(total_similarity / 10, 1.0)
+
+            if similarity_score > 0.3:
                 results.append({
                     "id": case["id"],
                     "description": case["description"],
@@ -567,12 +561,11 @@ class LegalAnalyticsCore:
                     "similarity": round(similarity_score, 2)
                 })
 
-        # Сортируем по убыванию схожести
         results.sort(key=lambda x: x["similarity"], reverse=True)
-        return results[:3]  # Возвращаем топ-3
+        return results[:3]
 
     def predict_outcome(self, nlp_analysis: Dict[str, Any], case_type: str) -> str:
-        """Прогнозирование исхода на основе NLP-анализа"""
+        """Прогнозирование исхода на основе анализа"""
         sentiment = nlp_analysis.get("sentiment", {})
         sentiment_score = sentiment.get("score", 0.5)
 
@@ -601,37 +594,26 @@ class LegalAnalyticsCore:
                 return "отказ в удовлетворении"
 
     def calculate_risk_score(self, nlp_analysis: Dict[str, Any]) -> float:
-        """Расчет оценки риска на основе NLP-анализа"""
+        """Расчет оценки риска"""
         sentiment = nlp_analysis.get("sentiment", {})
         sentiment_score = sentiment.get("score", 0.5)
-
         complexity = nlp_analysis.get("complexity_score", 0.5)
 
-        # Больше негативной тональности = выше риск
         risk_from_sentiment = 1.0 - sentiment_score
-
-        # Больше сложности = выше риск
         risk_from_complexity = complexity
 
-        # Объединяем риски
         total_risk = (risk_from_sentiment * 0.6 + risk_from_complexity * 0.4)
-
         return round(min(max(total_risk, 0.0), 1.0), 2)
 
     def generate_recommendations(self, role: str, nlp_analysis: Dict[str, Any],
                                  role_answers: Dict[str, str] = None) -> List[str]:
-        """Генерация рекомендаций на основе NLP-анализа"""
+        """Генерация рекомендаций"""
         recommendations = []
 
-        # Общие рекомендации на основе сложности
+        # Общие рекомендации
         complexity = nlp_analysis.get("complexity_score", 0.5)
         if complexity > 0.7:
             recommendations.append("Дело высокой сложности - рекомендуется тщательный анализ всех документов")
-
-        # Рекомендации на основе тональности
-        sentiment = nlp_analysis.get("sentiment", {})
-        if sentiment.get("negative_words", 0) > sentiment.get("positive_words", 0):
-            recommendations.append("Текст содержит больше негативных формулировок - обратите внимание на аргументацию")
 
         # Ролевые рекомендации
         if role == "судья":
@@ -642,14 +624,12 @@ class LegalAnalyticsCore:
             ])
         elif role == "адвокат":
             recommendations.extend([
-                f"Использовать ключевые слова: {', '.join(nlp_analysis.get('legal_terms_found', [])[:5])}",
                 "Подготовить ходатайства на основе выявленных противоречий",
                 "Усилить аргументацию по слабым местам"
             ])
         elif role == "прокурор":
             recommendations.extend([
                 "Проверить допустимость доказательств по ст. 75 УПК РФ",
-                "Учесть все обстоятельства, выявленные при анализе текста",
                 "Сопоставить выводы с аналогичными делами"
             ])
 
@@ -659,18 +639,15 @@ class LegalAnalyticsCore:
         """Поиск противоречий в деле"""
         contradictions = []
 
-        # Проверка количества документов
         if len(case.documents) < 2:
             contradictions.append(f"Мало документов ({len(case.documents)}). Рекомендуется дополнение.")
 
-        # Проверка денежных сумм
         monetary_amounts = nlp_analysis.get("monetary_amounts", [])
         if len(monetary_amounts) == 0:
             contradictions.append("В тексте не найдены конкретные денежные суммы")
         elif len(monetary_amounts) > 3:
             contradictions.append("Обнаружены расхождения в денежных суммах - требуется проверка")
 
-        # Проверка дат
         dates = nlp_analysis.get("dates_found", [])
         if len(dates) == 0:
             contradictions.append("В тексте не найдены конкретные даты")
@@ -682,14 +659,12 @@ class LegalAnalyticsCore:
         """Генерация ролевых инсайтов"""
         insights = []
 
-        # Общие инсайты из NLP-анализа
         word_count = nlp_analysis.get("word_count", 0)
         if word_count < 100:
             insights.append("Текст слишком краткий - рекомендуется дополнительное описание")
         elif word_count > 1000:
             insights.append("Текст слишком объемный - рекомендуется выделение ключевых моментов")
 
-        # Ролевые инсайты
         if role == "судья":
             sentiment = nlp_analysis.get("sentiment", {})
             if sentiment.get("sentiment") == "негативный":
@@ -699,10 +674,6 @@ class LegalAnalyticsCore:
             if len(legal_terms) > 5:
                 insights.append(
                     "Текст содержит достаточное количество юридических терминов - хорошая база для аргументации")
-        elif role == "прокурор":
-            law_refs = nlp_analysis.get("law_references", [])
-            if len(law_refs) > 0:
-                insights.append(f"Найдены ссылки на законы: {', '.join(law_refs[:3])}")
 
         return insights
 
@@ -712,7 +683,7 @@ class ReportPersonalizer:
         self.nlp_analyzer = NLPAnalyzer()
 
     def personalize(self, role: UserRole, case: LegalCase, analysis: AnalysisResult) -> PersonalizedReport:
-        """Персонализация отчета с NLP-данными"""
+        """Персонализация отчета"""
 
         # Базовые инсайты
         base_insights = [
@@ -768,34 +739,21 @@ class ReportPersonalizer:
             actions = [
                 "Проверить внутренние противоречия в материалах дела",
                 f"Сравнить с практикой: {analysis.similar_cases[0]['id'] if analysis.similar_cases else 'нет данных'}",
-                "Рассчитать объективную сумму компенсации на основе аналогов",
-                "Проверить соблюдение процессуальных сроков"
+                "Рассчитать объективную сумму компенсации на основе аналогов"
             ]
-            # Добавляем NLP-рекомендации
-            if analysis.nlp_analysis and "error" not in analysis.nlp_analysis:
-                complexity = analysis.nlp_analysis.get("complexity_score", 0)
-                if complexity > 0.7:
-                    actions.append("Дело высокой сложности - выделить дополнительное время на изучение")
 
         elif role == UserRole.LAWYER:
             actions = [
                 f"Использовать аналогичное дело {analysis.similar_cases[0]['id'] if analysis.similar_cases else 'N/A'}",
                 "Подготовить ходатайство об экспертизе",
-                "Сформулировать письменные возражения",
-                "Запросить дополнительные доказательства"
+                "Сформулировать письменные возражения"
             ]
-            # NLP-рекомендации для адвоката
-            if analysis.nlp_analysis:
-                legal_terms = analysis.nlp_analysis.get("legal_terms_found", [])
-                if legal_terms:
-                    actions.append(f"Использовать юридические термины: {', '.join(legal_terms[:3])}")
 
         elif role == UserRole.PROSECUTOR:
             actions = [
                 "Проверить достаточность доказательств для состава",
                 "Подготовить проект обвинительного заключения",
-                "Сверить сроки давности",
-                "Проанализировать позицию защиты"
+                "Сверить сроки давности"
             ]
 
         return actions
@@ -822,7 +780,7 @@ class ReportPersonalizer:
                 "Проверить допустимость доказательств по ст. 75 УПК РФ"
             ]
 
-        # Добавляем NLP-предупреждения
+        # NLP-предупреждения
         if analysis.nlp_analysis and "error" not in analysis.nlp_analysis:
             sentiment = analysis.nlp_analysis.get("sentiment", {})
             if sentiment.get("sentiment") == "негативный":
@@ -866,7 +824,6 @@ class ReportPersonalizer:
             }
         }
 
-        # Добавляем топ-ключевые слова
         top_keywords = nlp_data.get("top_keywords", [])
         if top_keywords:
             summary["топ_ключевые_слова"] = [
@@ -973,7 +930,7 @@ class JusticeAIAssistant:
         saved_path = self.data_manager.save_report(report)
 
         return {
-            "system": "AI-ассистент правосудия v2.0 с NLP",
+            "system": "AI-ассистент правосудия v2.0 с NLP (без NLTK)",
             "user_role": report.role.value,
             "case_id": report.case_id,
             "case_description": report.case_description,
@@ -993,7 +950,7 @@ class JusticeAIAssistant:
             },
             "role_context": f"Анализ с учетом роли {role.value} и NLP",
             "saved_to": saved_path,
-            "disclaimer": "Рекомендации носят справочный характер. NLP-анализ выполнен с помощью NLTK."
+            "disclaimer": "Рекомендации носят справочный характер. NLP-анализ выполнен с помощью правил и регулярных выражений."
         }
 
     def analyze_text_nlp(self, text: str) -> Dict[str, Any]:
@@ -1010,7 +967,7 @@ class UserInterface:
     def display_main_menu(self):
         while True:
             print("\n" + "=" * 60)
-            print("AI-АССИСТЕНТ ДЛЯ ПРАВОСУДИЯ")
+            print("AI-АССИСТЕНТ ДЛЯ ПРАВОСУДИЯ (без NLTK)")
             print("=" * 60)
 
             if self.assistant.current_role:
@@ -1098,10 +1055,10 @@ class UserInterface:
         for norm in analysis.legal_norms[:5]:
             print(f"  • {norm}")
 
-        # Показываем NLP-анализ, если есть
+        # Показываем NLP-анализ
         if analysis.nlp_analysis and "error" not in analysis.nlp_analysis:
             nlp_data = analysis.nlp_analysis
-            print(f"\n NLP-АНАЛИЗ ТЕКСТА:")
+            print(f"\n🔤 NLP-АНАЛИЗ ТЕКСТА (без NLTK):")
             print(f"  • Количество слов: {nlp_data.get('word_count', 0)}")
             print(f"  • Тональность: {nlp_data.get('sentiment', {}).get('sentiment', 'неизвестно')}")
             print(f"  • Сложность текста: {nlp_data.get('complexity_score', 0)}/1.0")
@@ -1154,8 +1111,8 @@ class UserInterface:
         # NLP-анализ
         if report_data.get('nlp_analysis'):
             nlp_info = report_data['nlp_analysis']
-            print(f"\n🤖 NLP-АНАЛИЗ:")
-            if nlp_info.get('status') == 'успешно выполнен':
+            print(f"\n🤖 NLP-АНАЛИЗ (без NLTK):")
+            if nlp_info.get('статус') == 'успешно выполнен':
                 metrics = nlp_info.get('основные_показатели', {})
                 print(f"  • Слов: {metrics.get('количество_слов', 0)}")
                 print(f"  • Предложений: {metrics.get('количество_предложений', 0)}")
@@ -1167,7 +1124,7 @@ class UserInterface:
                 found_data = nlp_info.get('найденные_данные', {})
                 if found_data:
                     print(f"  • Денежных сумм: {found_data.get('денежные_суммы', 0)}")
-                    print(f"  • Дат: {found_data.get('даты', 0)}")
+                    print(f"  • Датировано: {found_data.get('даты', 0)}")
 
         saved_msg = f" в: {report_data['saved_to']}" if report_data['saved_to'] else ""
         print(f"\n💾 Отчет сохранен{saved_msg}")
@@ -1216,7 +1173,7 @@ class UserInterface:
                                 report_data = json.load(f)
                                 role = report_data.get('role', 'неизвестно')
                                 case_id = report_data.get('case_id', 'N/A')
-                                has_nlp = "🤖" if report_data.get('nlp_analysis') else ""
+                                has_nlp = "🤖" if report_data.get('nlp_summary') else ""
                                 print(f"\n📄 {has_nlp} {r}")
                                 print(f"   Дело: {case_id}, Роль: {role}")
                         except:
@@ -1228,7 +1185,7 @@ class UserInterface:
 
     def nlp_analysis_menu(self):
         print("\n" + "=" * 60)
-        print("🔧 NLP-АНАЛИЗ ПРОИЗВОЛЬНОГО ТЕКСТА")
+        print("🔧 NLP-АНАЛИЗ ПРОИЗВОЛЬНОГО ТЕКСТА (без NLTK)")
         print("=" * 60)
 
         print("\nВведите текст для анализа (введите 'готово' на новой строке):")
@@ -1257,14 +1214,13 @@ class UserInterface:
         if "error" in nlp_result:
             print(f"\n❌ Ошибка анализа: {nlp_result['error']}")
         else:
-            print(f"\n📊 РЕЗУЛЬТАТЫ NLP-АНАЛИЗА:")
+            print(f"\n📊 РЕЗУЛЬТАТЫ NLP-АНАЛИЗА (без NLTK):")
             print(f"  • Слов: {nlp_result.get('word_count', 0)}")
             print(f"  • Предложений: {nlp_result.get('sentence_count', 0)}")
 
             sentiment = nlp_result.get('sentiment', {})
             if sentiment:
-                print(
-                    f"  • Тональность: {sentiment.get('sentiment', 'неизвестно')} (оценка: {sentiment.get('score', 0)})")
+                print(f"  • Тональность: {sentiment.get('sentiment', 'неизвестно')}")
 
             print(f"  • Сложность текста: {nlp_result.get('complexity_score', 0)}/1.0")
 
@@ -1284,11 +1240,6 @@ class UserInterface:
                 print(f"  • Найдено дат: {len(dates)}")
                 print(f"    Примеры: {', '.join(dates[:3])}")
 
-            law_refs = nlp_result.get('law_references', [])
-            if law_refs:
-                print(f"  • Найдено ссылок на законы: {len(law_refs)}")
-                print(f"    Примеры: {', '.join(law_refs[:3])}")
-
         input("\n↵ Продолжить...")
 
     def show_statistics_menu(self):
@@ -1296,7 +1247,7 @@ class UserInterface:
         cases = self.assistant.data_manager.load_cases()
 
         print("\n" + "=" * 60)
-        print("📈 СТАТИСТИКА ПРОЕКТА С NLP")
+        print("📈 СТАТИСТИКА ПРОЕКТА С NLP ")
         print("=" * 60)
 
         print(f"\n📊 ОБЩАЯ СТАТИСТИКА:")
@@ -1322,7 +1273,7 @@ class UserInterface:
             print(f"  • Сохранено отчетов: {len(reports)}")
 
         # Статистика NLP
-        print(f"\n🤖 NLP-ВОЗМОЖНОСТИ:")
+        print(f"\n NLP-ВОЗМОЖНОСТИ:")
         print(f"  • База для семантического поиска: {len(self.assistant.core.case_examples_db)} дел")
         print(f"  • Анализируемых юридических терминов: {len(self.assistant.nlp_analyzer.extract_legal_terms(''))}")
 
@@ -1342,14 +1293,9 @@ class UserInterface:
 
 def main():
     print("\n" + "=" * 70)
-    print("  AI-АССИСТЕНТ ДЛЯ ПРАВОСУДИЯ ")
-
-
-    print("\n⚠ Первый запуск: идет загрузка NLP-ресурсов...")
-    try:
-        nltk.data.find('tokenizers/punkt_tab')
-    except:
-        pass
+    print("  AI-АССИСТЕНТ ДЛЯ ПРАВОСУДИЯ")
+    print("  Разработка прототипа с NLP-анализом на основе правил")
+    print("=" * 70)
 
     ui = UserInterface()
     ui.display_main_menu()
